@@ -1,67 +1,59 @@
-# NetBird VPS auto-update
+# Mises à jour approuvées pour VPS NetBird
 
-A small systemd-based updater for a self-hosted NetBird Docker Compose stack. It checks for changed images every six hours, waits 24 hours after first detection, makes a root-only backup, updates NetBird, checks the API, and sends Telegram notifications.
+Un agent local pour Ubuntu/Debian qui vérifie les mises à jour Ubuntu et les images Docker des services actifs d’un projet Docker Compose. Il attend 24 heures par défaut après la détection d’une version stable, puis envoie une demande Telegram avec les boutons **Installer et redémarrer si nécessaire** et **Ignorer**. Rien n’est installé tant que tu n’as pas appuyé sur le bouton.
 
-Messages use a configurable prefix, for example:
+Après approbation, il fait une sauvegarde protégée du système et, si des images Docker ont changé, une sauvegarde des données/configurations NetBird avant de mettre à jour. Il exécute `apt-get upgrade` sans suppression automatique de paquets, met à jour les services Docker actifs du Compose indiqué, vérifie qu’ils tournent, puis redémarre uniquement si Ubuntu crée `/var/run/reboot-required`. Au retour du VPS, Telegram reçoit un message de confirmation.
+
+Exemple de notification :
 
 ```text
-VPS NETBIRD - CONTAINER update détectée pour NetBird; délai de sécurité de 24 h commencé.
-VPS NETBIRD - CONTAINER update terminée pour NetBird; services et API vérifiés.
+VPS NETBIRD - UPDATE prête après le délai de stabilité.
+2 paquet(s) Ubuntu, 3 service(s) Docker
+Installer mettra à jour Ubuntu et les services Docker du fichier Compose...
 ```
 
-The original `containrrr/watchtower` repository was archived in December 2025. This project uses a local systemd service instead, so it does not add a container with access to the Docker socket.
+## Installation guidée
 
-## What it updates
-
-By default, it updates only these Compose services:
-
-- `netbird-server`
-- `dashboard`
-- `proxy`
-
-It does not update CrowdSec, Traefik, or other containers. To change the targets, edit `TARGETS` in `/etc/netbird-auto-update/config.env`.
-
-The updater pulls the configured image references and records the candidate image IDs. The full set must remain unchanged for `GRACE_HOURS` (24 by default); any changed ID restarts the timer. The six-hour poll interval means installation happens at least 24 hours after first detection, plus up to one poll interval.
-
-Before applying an update, the backup script briefly stops `netbird-server` and CrowdSec when present so SQLite and CrowdSec data can be copied consistently. It archives the Compose/config files and the NetBird data volume. Archives are stored under `/var/backups/netbird`, mode `0600`; the newest is retained indefinitely and older ones are pruned after 24 hours. These archives contain secrets and stay on the same VPS unless you copy them elsewhere.
-
-After updating, the service checks that every target container is running and that `HEALTHCHECK_URL` returns HTTP 200 or 401 over valid HTTPS. On failure it sends an alert and keeps the backup. It does not automatically restore the database; review the journal and restore manually if needed.
-
-## Install
-
-Requirements: Ubuntu/Debian with systemd, Docker Compose v2, Python 3, and a NetBird Compose deployment.
+Prérequis : Ubuntu/Debian avec systemd, Python 3, Docker Compose v2, un projet Compose NetBird et `git`. Le dépôt doit être public pour le clonage sans connexion GitHub.
 
 ```bash
-git clone https://github.com/OWNER/netbird-vps-auto-updater.git
-cd netbird-vps-auto-updater
-sudo ./install.sh
-sudo nano /etc/netbird-auto-update/config.env
+git clone https://github.com/Allen-Jacob/netbird-vps-auto-updater.git && cd netbird-vps-auto-updater && sudo ./install.sh
 ```
 
-Set at least:
+L’installateur te demande :
 
-- `VPS_LABEL="VPS NETBIRD"` (choose the prefix for Telegram messages)
-- `COMPOSE_FILE=/path/to/docker-compose.yml`
-- `HEALTHCHECK_URL=https://your-netbird-domain/api/instance/version`
+1. Le libellé du VPS qui apparaîtra au début de chaque message, par exemple `VPS NETBIRD`.
+2. Le chemin du fichier Docker Compose.
+3. Le délai de stabilité, 24 heures par défaut.
+4. L’URL de contrôle de l’API NetBird, détectée automatiquement depuis `proxy.env` si possible.
+5. Le token du nouveau bot Telegram, avec saisie masquée.
 
-Keep the service names in `TARGETS` aligned with your Compose file. Do not put Telegram tokens in this repo or in `config.env`.
+Avant de continuer, crée le bot avec `@BotFather`, ouvre-le dans Telegram et envoie `/start`. L’installateur vérifie le bot, trouve ton chat privé, envoie un message de test, puis active les services. Il désactive l’ancien minuteur automatique NetBird pour éviter deux mécanismes de mise à jour concurrents.
 
-## Telegram setup
+Le token et les identifiants Telegram sont écrits seulement dans `/etc/vps-update-agent/telegram.env` avec les permissions `0600`. Ils ne sont ni demandés en argument de commande ni enregistrés dans GitHub. Les boutons sont acceptés uniquement depuis le compte Telegram et le chat enregistrés pendant l’installation.
 
-1. In Telegram, use the official `@BotFather` and send `/newbot`.
-2. Choose a display name and a unique username ending in `bot`.
-3. Open your new bot and send `/start`.
-4. On the VPS, run `sudo /usr/local/sbin/netbird-telegram-setup.py`. Paste the BotFather token at the hidden prompt.
+## Comportement
 
-The setup script discovers the private chat ID, writes the token to `/etc/netbird-auto-update/telegram.env` with mode `0600`, sends a test message, and enables the timer only after that message succeeds.
+- Vérifie toutes les six heures les mises à jour APT et les images des services Compose actifs qui ont une image distante.
+- Envoie une première alerte quand une mise à jour apparaît. Si la liste reste identique pendant le délai configuré, envoie le bouton d’approbation.
+- Si l’image ou les paquets changent, le délai repart. **Ignorer** écarte cette liste jusqu’à ce qu’elle change.
+- Le bouton **Installer** vérifie à nouveau la liste avant d’agir. Si elle a changé depuis la notification, l’ancienne approbation est rejetée et le délai repart.
+- La sauvegarde système conserve `/etc`, l’état APT et la sélection des paquets dans `/var/backups/vps-update`, avec permissions `0600`. La dernière est gardée; les précédentes sont supprimées après 24 heures.
+- Si des images NetBird/CrowdSec changent, `vps-update-backup.py` sauvegarde les données et configurations NetBird/CrowdSec dans `/var/backups/netbird`, en arrêtant brièvement les services nécessaires à la cohérence SQLite.
+- Les fichiers de sauvegarde sont sur le même VPS et contiennent des secrets; ils ne remplacent pas une sauvegarde hors site.
+- Ubuntu `upgrade` ne supprime pas automatiquement de paquets. Les mises à jour qui nécessitent une suppression ou qui sont retenues peuvent rester en attente.
+- Si une commande échoue, l’agent t’envoie une alerte, garde les sauvegardes et bloque la répétition automatique de cette même liste.
 
-## Operations
+## Vérification et journaux
 
 ```bash
-systemctl list-timers netbird-auto-update.timer
-systemctl status netbird-auto-update.timer
-journalctl -u netbird-auto-update.service -n 100 --no-pager
-ls -lh /var/backups/netbird
+systemctl status vps-update-agent.service vps-update-scan.timer
+journalctl -u vps-update-agent.service -u vps-update-scan.service -n 100 --no-pager
+ls -lh /var/backups/vps-update /var/backups/netbird
 ```
 
-The first successful check only records an update candidate. It does not update immediately. A failed candidate is blocked from repeated automatic attempts; a new image candidate starts a fresh 24-hour window.
+Pour changer le libellé, le chemin Compose ou le délai, modifie `/etc/vps-update-agent/config.env`. Le bouton garde les droits au compte Telegram identifié lors de l’installation.
+
+## Limites
+
+Ce dépôt ne peut pas revenir automatiquement à l’ancienne version Ubuntu ni restaurer une base NetBird après une mise à jour ratée. L’alerte indiquera l’échec et le chemin de la sauvegarde pour une restauration manuelle. Les sauvegardes restent locales; configure aussi une sauvegarde externe si tu veux te protéger contre la perte du VPS.
