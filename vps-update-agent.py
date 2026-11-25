@@ -109,6 +109,8 @@ def run(args, check=True, log=False, timeout=None):
     env = os.environ.copy()
     if args and args[0] in ('apt', 'apt-get'):
         env['DEBIAN_FRONTEND'] = 'noninteractive'
+        env['LC_ALL'] = 'C'
+        env['LANG'] = 'C'
     if log:
         LOG.parent.mkdir(parents=True, exist_ok=True)
         if LOG.exists() and LOG.stat().st_size > 2 * 1024 * 1024:
@@ -120,6 +122,9 @@ def run(args, check=True, log=False, timeout=None):
             stream.write('\n[' + time.strftime('%Y-%m-%d %H:%M:%S %z') + '] $ ' + ' '.join(args) + '\n')
             stream.flush()
             p = subprocess.run(args, text=True, stdout=stream, stderr=subprocess.STDOUT, timeout=timeout, env=env)
+        if check and p.returncode:
+            detail = LOG.read_text(errors='replace')[-1000:]
+            raise RuntimeError('Command failed (' + ' '.join(args[:3]) + '): ' + detail)
         return p
     p = subprocess.run(args, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout, env=env)
     if check and p.returncode:
@@ -193,9 +198,14 @@ def scan_candidate(cfg):
     packages = [line.split('/', 1)[0] + ' ' + line.split()[1]
                 for line in apt.stdout.splitlines()
                 if '/' in line and len(line.split()) > 1 and not line.startswith('Listing')]
+    simulation = run(['apt-get', '-s', 'full-upgrade'], timeout=1800)
+    plan = [line for line in simulation.stdout.splitlines() if line.startswith(('Inst ', 'Remv '))]
+    planned_upgrades = sorted({line.split()[1] for line in plan if line.startswith('Inst ') and len(line.split()) > 1})
+    removals = sorted({line.split()[1] for line in simulation.stdout.splitlines()
+                       if line.startswith('Remv ') and len(line.split()) > 1})
     docker = image_candidates(cfg)
-    candidate = {'packages': sorted(set(packages)), 'docker': docker}
-    return candidate if packages or docker else None
+    candidate = {'packages': sorted(set(packages)), 'apt_plan': plan, 'removals': removals, 'docker': docker}
+    return candidate if packages or plan or docker else None
 
 
 def digest(candidate):
@@ -203,15 +213,18 @@ def digest(candidate):
 
 
 def notify_candidate(cfg, candidate, signature, stable=False):
-    count_apt, count_docker = len(candidate['packages']), len(candidate['docker'])
-    summary = f"{count_apt} paquet(s) Ubuntu, {count_docker} service(s) Docker"
+    count_apt, count_docker = len(candidate.get('apt_plan', [])) - len(candidate.get('removals', [])), len(candidate['docker'])
+    count_removals = len(candidate.get('removals', []))
+    summary = f"{count_apt} action(s) APT, {count_docker} service(s) Docker, {count_removals} suppression(s) APT prévue(s)"
     if not stable:
         send(f"{cfg['label']} - {cfg['prefix']} détectée: {summary}. Délai de stabilité de {cfg['grace'] // 3600} h en cours; je te demanderai ton accord ensuite.")
         return
     lines = [f"{cfg['label']} - {cfg['prefix']} prête après le délai de stabilité.", summary,
              'Installer mettra à jour Ubuntu et les services Docker du fichier Compose. Le VPS redémarrera seulement si Ubuntu le demande.']
-    if candidate['packages']:
-        lines.append('Paquets: ' + ', '.join(candidate['packages'][:20]))
+    if candidate.get('apt_plan'):
+        lines.append('Plan APT: ' + '; '.join(candidate['apt_plan'][:16]))
+    if candidate.get('removals'):
+        lines.append('Suppression(s) prévue(s) par APT: ' + ', '.join(candidate['removals'][:20]))
     if candidate['docker']:
         lines.append('Services Docker: ' + ', '.join(sorted(candidate['docker'])[:20]))
     short = signature[:32]
@@ -361,7 +374,7 @@ def apply_approved(cfg, signature):
                 check_netbird_api(cfg)
             system_backup = create_system_backup()
             run(['apt-get', '-y', '-o', 'Dpkg::Options::=--force-confdef',
-                 '-o', 'Dpkg::Options::=--force-confold', 'upgrade'], log=True, timeout=14400)
+                 '-o', 'Dpkg::Options::=--force-confold', 'full-upgrade'], log=True, timeout=14400)
 
             backup = None
             if fresh['docker']:
@@ -398,7 +411,7 @@ def apply_approved(cfg, signature):
             state['last_success_at'] = time.time()
             state['last_success_signature'] = signature
             state_write(state)
-            detail = f"{len(fresh['packages'])} paquet(s) Ubuntu et {len(fresh['docker'])} service(s) Docker vérifiés."
+            detail = f"{len(fresh.get('apt_plan', []))} action(s) APT et {len(fresh['docker'])} service(s) Docker vérifiés."
             detail += ' Sauvegarde système: ' + system_backup + '.'
             if backup:
                 detail += ' Sauvegarde NetBird: ' + backup
