@@ -1,0 +1,18 @@
+[Unit]
+Description=Telegram-approved Ubuntu and Docker updates
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/local/sbin/vps-update-agent.py --bot
+Restart=always
+RestartSec=10
+TimeoutStartSec=0
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
