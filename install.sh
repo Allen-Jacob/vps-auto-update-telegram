@@ -27,7 +27,7 @@ install -m 0644 "$repo_dir/systemd/vps-update-agent.service" /etc/systemd/system
 install -m 0644 "$repo_dir/systemd/vps-update-scan.service" /etc/systemd/system/vps-update-scan.service
 install -m 0644 "$repo_dir/systemd/vps-update-scan.timer" /etc/systemd/system/vps-update-scan.timer
 
-echo "Le token sera saisi de façon masquée. Avant de continuer, crée un bot avec @BotFather puis envoie /start à ce nouveau bot dans Telegram."
+echo "Tu peux réutiliser le bot de l’ancien minuteur ou en saisir un autre de façon masquée. Ouvre le bot dans Telegram et envoie /start quand le script te le demande."
 python3 /usr/local/sbin/setup-vps-update-telegram.py
 
 # Only replace the old automatic Docker updater after the new bot has passed its Telegram test.
