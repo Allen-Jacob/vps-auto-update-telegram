@@ -12,6 +12,7 @@ import urllib.request
 
 DEST = pathlib.Path('/etc/vps-update-agent/telegram.env')
 CONFIG = pathlib.Path('/etc/vps-update-agent/config.env')
+OLD_SECRETS = pathlib.Path('/etc/netbird-auto-update/telegram.env')
 
 
 def call(token, method, fields=None, timeout=15):
@@ -65,7 +66,24 @@ def main():
         raise SystemExit('Le délai doit être un nombre entier d’heures.')
     if grace < 1 or grace > 720:
         raise SystemExit('Le délai doit être entre 1 et 720 heures.')
-    token = getpass.getpass('Token Telegram du nouveau bot (saisie masquée): ').strip()
+    prior_chat_id = ''
+    reuse = False
+    if OLD_SECRETS.is_file():
+        old_mode = OLD_SECRETS.stat().st_mode & 0o777
+        if old_mode & 0o077:
+            raise SystemExit('Ancien fichier Telegram trop permissif; corrige ses permissions avant de le réutiliser.')
+        old = {}
+        for line in OLD_SECRETS.read_text().splitlines():
+            if '=' in line and not line.lstrip().startswith('#'):
+                key, value = line.split('=', 1)
+                old[key.strip()] = value.strip()
+        if old.get('BOT_TOKEN'):
+            reuse = input('Réutiliser le bot déjà configuré par l’ancien minuteur NetBird? [O/n]: ').strip().lower() not in ('n', 'non')
+            if reuse:
+                token = old['BOT_TOKEN']
+                prior_chat_id = old.get('CHAT_ID', '')
+    if not reuse:
+        token = getpass.getpass('Token Telegram du bot (saisie masquée): ').strip()
     if not token or ':' not in token:
         raise SystemExit('Token invalide.')
     me = call(token, 'getMe')
@@ -90,7 +108,8 @@ def main():
             sender = message.get('from', {})
             if (message.get('text', '').split()[0:1] == ['/start']
                     and chat.get('type') == 'private'
-                    and sender.get('id') == chat.get('id')):
+                    and sender.get('id') == chat.get('id')
+                    and (not prior_chat_id or str(chat.get('id')) == prior_chat_id)):
                 chats.append((str(chat['id']), str(sender['id'])))
         if chats:
             break
