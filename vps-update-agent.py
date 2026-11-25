@@ -133,10 +133,10 @@ def run(args, check=True, log=False, timeout=None):
     return p
 
 
-def compose(cfg, *args, check=True, log=False):
+def compose(cfg, *args, check=True, log=False, timeout=None):
     if not cfg['compose'].is_file():
         raise RuntimeError('Compose file not found: ' + str(cfg['compose']))
-    return run(['docker', 'compose', '-f', str(cfg['compose']), *args], check=check, log=log)
+    return run(['docker', 'compose', '-f', str(cfg['compose']), *args], check=check, log=log, timeout=timeout)
 
 
 def state_read():
