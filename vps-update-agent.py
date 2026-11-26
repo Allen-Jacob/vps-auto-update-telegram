@@ -493,12 +493,27 @@ def handle_message(update):
     command = words[0].split('@')[0].lower()
     cfg = settings()
     if command == '/update':
-        # The normal scan retains the stability delay and Telegram approval.
-        result = run(['systemctl', 'start', '--no-block', 'vps-update-scan.service'], check=False)
-        if result.returncode:
-            send(f"{cfg['label']} - {cfg['prefix']}: impossible de lancer la vérification. Consulte journalctl -u vps-update-scan.service.")
-        else:
-            send(f"{cfg['label']} - {cfg['prefix']}: vérification lancée. Si une mise à jour est détectée, le délai de stabilité et l'approbation Telegram s'appliquent.")
+        send(f"{cfg['label']} - {cfg['prefix']}: commande manuelle reçue. Vérification puis installation immédiate si des mises à jour sont disponibles.")
+        with locked():
+            try:
+                candidate = scan_candidate(cfg)
+            except Exception as exc:
+                send(f"{cfg['label']} - ALERTE {cfg['prefix']}: vérification manuelle impossible; rien n'a été installé. {str(exc)[:600]}")
+                raise
+            state = state_read()
+            if candidate is None:
+                state.pop('pending', None)
+                state.pop('declined', None)
+                state_write(state)
+                send(f"{cfg['label']} - {cfg['prefix']}: aucune mise à jour disponible.")
+                return
+            signature = digest(candidate)
+            state['pending'] = {'signature': signature, 'candidate': candidate,
+                                'first_seen': time.time(), 'status': 'ready',
+                                'detected_notified': True, 'manual': True}
+            state.pop('declined', None)
+            state_write(state)
+        apply_approved(cfg, signature[:32])
     elif command == '/infoupdate':
         with locked():
             state = state_read()
