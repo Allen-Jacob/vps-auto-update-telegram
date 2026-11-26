@@ -34,6 +34,8 @@ Le token et les identifiants Telegram sont écrits seulement dans `/etc/vps-upda
 
 ## Comportement
 
+Dans la conversation privée avec le bot, `/update` lance immédiatement une nouvelle vérification des paquets Ubuntu et des images Docker. Si une mise à jour est détectée, le délai de 24 heures depuis la première détection et le bouton d'approbation continuent de s'appliquer. `/infoupdate` indique la date et le résumé de la dernière mise à jour terminée par cet agent; s'il n'en a pas encore effectué, il le précise. Seul le compte Telegram autorisé peut utiliser ces commandes.
+
 - Vérifie toutes les six heures les mises à jour APT et les images des services Compose actifs qui ont une image distante.
 - Envoie une première alerte quand une mise à jour apparaît. Si la liste reste identique pendant le délai configuré, envoie le bouton d’approbation.
 - Si l’image ou les paquets changent, le délai repart. **Ignorer** écarte cette liste jusqu’à ce qu’elle change.
