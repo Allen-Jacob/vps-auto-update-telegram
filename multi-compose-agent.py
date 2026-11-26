@@ -70,6 +70,7 @@ def apply_approved(cfg, signature):
             state.pop('declined', None)
             state['last_success_at'] = time.time()
             state['last_success_signature'] = signature
+            state['last_success_detail'] = f"{len(fresh['apt_plan'])} action(s) APT; {len(fresh['docker'])} service(s) Docker."
             base.state_write(state)
             detail = f"{len(fresh['apt_plan'])} action(s) APT; {len(fresh['docker'])} service(s) Docker. Sauvegarde système: {system_backup}."
             if backup:
