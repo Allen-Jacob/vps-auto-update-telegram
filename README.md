@@ -1,6 +1,6 @@
 # VPS Auto Update Telegram
 
-Un agent local pour Ubuntu/Debian qui vérifie les mises à jour Ubuntu et les images Docker des services actifs d’un projet Docker Compose. Il attend 24 heures par défaut après la détection d’une version stable, puis envoie une demande Telegram avec les boutons **Installer et redémarrer si nécessaire** et **Ignorer**. Rien n’est installé tant que tu n’as pas appuyé sur le bouton.
+Un agent local pour Ubuntu/Debian qui vérifie les mises à jour Ubuntu et les images Docker des services actifs d’un projet Docker Compose. Pour les mises à jour détectées automatiquement, il attend 24 heures par défaut, puis envoie une demande Telegram avec les boutons **Installer et redémarrer si nécessaire** et **Ignorer**. La commande manuelle `/update` lance l'installation sans ce délai.
 
 Après approbation, il fait une sauvegarde protégée du système et, si des images Docker ont changé, une sauvegarde des données/configurations NetBird avant de mettre à jour. Il simule `apt-get full-upgrade` pour afficher le plan, y compris les suppressions éventuelles, puis l’exécute seulement après approbation. Il met aussi à jour les services Docker actifs du Compose indiqué, vérifie l’API NetBird et l’état des conteneurs, puis redémarre uniquement si Ubuntu crée `/var/run/reboot-required`. Au retour du VPS, Telegram reçoit un message de confirmation.
 
@@ -34,7 +34,7 @@ Le token et les identifiants Telegram sont écrits seulement dans `/etc/vps-upda
 
 ## Comportement
 
-Dans la conversation privée avec le bot, `/update` lance immédiatement une nouvelle vérification des paquets Ubuntu et des images Docker. Si une mise à jour est détectée, le délai de 24 heures depuis la première détection et le bouton d'approbation continuent de s'appliquer. `/infoupdate` indique la date et le résumé de la dernière mise à jour terminée par cet agent; s'il n'en a pas encore effectué, il le précise. Seul le compte Telegram autorisé peut utiliser ces commandes.
+Dans la conversation privée avec le bot, `/update` lance une vérification puis installe immédiatement les mises à jour Ubuntu et Docker disponibles, après sauvegarde et nouvelle vérification. Cette commande est une approbation manuelle : elle n'attend pas les 24 heures. Le délai de 24 heures et le bouton d'approbation restent en vigueur pour les mises à jour détectées automatiquement. Si Ubuntu l'exige, le VPS redémarre et le bot confirme son retour. `/infoupdate` indique la date et le résumé de la dernière mise à jour terminée par cet agent; s'il n'en a pas encore effectué, il le précise. Seul le compte Telegram autorisé peut utiliser ces commandes.
 
 - Vérifie toutes les six heures les mises à jour APT et les images des services Compose actifs qui ont une image distante.
 - Envoie une première alerte quand une mise à jour apparaît. Si la liste reste identique pendant le délai configuré, envoie le bouton d’approbation.
