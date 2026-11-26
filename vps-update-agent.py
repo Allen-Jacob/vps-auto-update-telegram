@@ -410,6 +410,7 @@ def apply_approved(cfg, signature):
             state.pop('declined', None)
             state['last_success_at'] = time.time()
             state['last_success_signature'] = signature
+            state['last_success_detail'] = f"{len(fresh.get('apt_plan', []))} action(s) APT; {len(fresh['docker'])} service(s) Docker."
             state_write(state)
             detail = f"{len(fresh.get('apt_plan', []))} action(s) APT et {len(fresh['docker'])} service(s) Docker vérifiés."
             detail += ' Sauvegarde système: ' + system_backup + '.'
@@ -479,6 +480,37 @@ def send_reboot_completion():
     REBOOT_MARKER.unlink(missing_ok=True)
 
 
+def handle_message(update):
+    message = update['message']
+    _, chat_id, user_id = credentials()
+    if (str(message.get('chat', {}).get('id')) != chat_id
+            or str(message.get('from', {}).get('id')) != user_id
+            or message.get('chat', {}).get('type') != 'private'):
+        return
+    words = (message.get('text') or '').split(maxsplit=1)
+    if not words:
+        return
+    command = words[0].split('@')[0].lower()
+    cfg = settings()
+    if command == '/update':
+        # The normal scan retains the stability delay and Telegram approval.
+        result = run(['systemctl', 'start', '--no-block', 'vps-update-scan.service'], check=False)
+        if result.returncode:
+            send(f"{cfg['label']} - {cfg['prefix']}: impossible de lancer la vérification. Consulte journalctl -u vps-update-scan.service.")
+        else:
+            send(f"{cfg['label']} - {cfg['prefix']}: vérification lancée. Si une mise à jour est détectée, le délai de stabilité et l'approbation Telegram s'appliquent.")
+    elif command == '/infoupdate':
+        with locked():
+            state = state_read()
+        completed = state.get('last_success_at')
+        if completed:
+            when = time.strftime('%Y-%m-%d %H:%M:%S %Z', time.localtime(float(completed)))
+            detail = state.get('last_success_detail', 'Détails non enregistrés pour cette mise à jour.')
+            send(f"{cfg['label']} - dernière mise à jour réussie : {when}. {detail}")
+        else:
+            send(f"{cfg['label']} - aucune mise à jour réussie enregistrée par cet agent.")
+
+
 def bot_loop():
     try:
         send_reboot_completion()
@@ -507,7 +539,7 @@ def bot_loop():
             except Exception:
                 pass
         try:
-            updates = api('getUpdates', {'offset': offset, 'timeout': 25, 'allowed_updates': ['callback_query']}, timeout=35) or []
+            updates = api('getUpdates', {'offset': offset, 'timeout': 25, 'allowed_updates': ['callback_query', 'message']}, timeout=35) or []
             for update in updates:
                 offset = max(offset, int(update['update_id']) + 1)
                 if 'callback_query' in update:
@@ -519,6 +551,9 @@ def bot_loop():
                     else:
                         answer_callback(q['id'], 'Utilisateur non autorisé')
                         save_offset(offset)
+                elif 'message' in update:
+                    save_offset(offset)
+                    handle_message(update)
                 else:
                     save_offset(offset)
         except Exception as exc:
